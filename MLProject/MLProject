@@ -1,0 +1,33 @@
+name: Palmer_Penguins_Classification
+
+docker_env:
+  image: penguin-ml-project:latest
+
+entry_points:
+  main:
+    parameters:
+      test_size: {type: float, default: 0.2}
+      random_state: {type: int, default: 42}
+      n_estimators: {type: int, default: 100}
+      max_depth: {type: int, default: 10}
+    command: "python modelling.py --test_size {test_size} --random_state {random_state} --n_estimators {n_estimators} --max_depth {max_depth}"
+
+  train_rf:
+    parameters:
+      n_estimators: {type: int, default: 100}
+      max_depth: {type: int, default: 10}
+      random_state: {type: int, default: 42}
+    command: "python modelling.py --model random_forest --n_estimators {n_estimators} --max_depth {max_depth} --random_state {random_state}"
+
+  train_lr:
+    parameters:
+      max_iter: {type: int, default: 1000}
+      random_state: {type: int, default: 42}
+    command: "python modelling.py --model logistic_regression --max_iter {max_iter} --random_state {random_state}"
+
+  train_svm:
+    parameters:
+      C: {type: float, default: 1.0}
+      kernel: {type: str, default: "rbf"}
+      random_state: {type: int, default: 42}
+    command: "python modelling.py --model svm --C {C} --kernel {kernel} --random_state {random_state}"

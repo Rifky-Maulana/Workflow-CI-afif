@@ -1,0 +1,117 @@
+name: MLflow CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      model_type:
+        description: 'Model to train'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - random_forest
+        - logistic_regression
+        - svm
+      n_estimators:
+        description: 'Number of estimators (RF)'
+        required: false
+        default: '100'
+      max_depth:
+        description: 'Max depth (RF)'
+        required: false
+        default: '10'
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Set up Conda
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        auto-update-conda: true
+        python-version: '3.9'
+        environment-file: MLProject/conda.yaml
+        activate-environment: penguins-ml-env
+        
+    - name: Install MLflow
+      shell: bash -l {0}
+      run: |
+        conda activate penguins-ml-env
+        pip install mlflow
+        
+    - name: Verify environment
+      shell: bash -l {0}
+      run: |
+        conda activate penguins-ml-env
+        python --version
+        pip list
+        
+    - name: Run MLflow Project (Scheduled/Push)
+      if: github.event_name != 'workflow_dispatch'
+      shell: bash -l {0}
+      run: |
+        conda activate penguins-ml-env
+        cd MLProject
+        mlflow run . --env-manager=conda
+        
+    - name: Run MLflow Project (Manual)
+      if: github.event_name == 'workflow_dispatch'
+      shell: bash -l {0}
+      run: |
+        conda activate penguins-ml-env
+        cd MLProject
+        mlflow run . --env-manager=conda -P model=${{ github.event.inputs.model_type }} -P n_estimators=${{ github.event.inputs.n_estimators }} -P max_depth=${{ github.event.inputs.max_depth }}
+        
+    - name: Upload MLflow artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mlflow-artifacts
+        path: MLProject/mlruns/
+        
+    - name: Upload training logs
+      uses: actions/upload-artifact@v3
+      with:
+        name: training-logs
+        path: MLProject/model_training.log
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: train-model
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./MLProject
+        push: true
+        tags: ${{ secrets.DOCKER_USERNAME }}/penguin-ml-project:latest
+        platforms: linux/amd64,linux/arm64
