@@ -1,15 +1,14 @@
-name: penguins-ml-env
+name: mlflow-env
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
+  - python=3.8
+  - pandas=1.5.3
+  - numpy=1.24.3
+  - scikit-learn=1.3.0
   - pip
   - pip:
-    - pandas==2.1.4
-    - numpy==1.24.3
-    - scikit-learn==1.3.0
-    - mlflow==2.8.1
-    - matplotlib==3.7.2
-    - seaborn==0.12.2
-    - argparse
+    - mlflow>=2.0
+    - matplotlib
+    - seaborn

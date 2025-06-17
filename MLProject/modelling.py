@@ -1,227 +1,243 @@
+"""
+Modelling.py - MLflow Implementation for CI/CD
+Kriteria 3: Workflow CI dengan MLflow Project
+"""
+
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 import mlflow
 import mlflow.sklearn
-import logging
-import os
-import argparse
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import warnings
+import argparse
+import sys
+import os
+
 warnings.filterwarnings('ignore')
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('model_training.log'),
-        logging.StreamHandler()
-    ]
-)
-
-def parse_args():
-    """
-    Parse command line arguments for MLflow Project
-    """
-    parser = argparse.ArgumentParser(description='Train Palmer Penguins Classification Models')
+def load_data():
+    """Load preprocessed data"""
+    print("📊 Loading preprocessed data...")
     
-    # General parameters
-    parser.add_argument('--test_size', type=float, default=0.2, help='Test set size')
-    parser.add_argument('--random_state', type=int, default=42, help='Random state')
-    parser.add_argument('--model', type=str, default='all', 
-                       choices=['all', 'random_forest', 'logistic_regression', 'svm'],
-                       help='Model to train')
-    
-    # Random Forest parameters
-    parser.add_argument('--n_estimators', type=int, default=100, help='Number of estimators for RF')
-    parser.add_argument('--max_depth', type=int, default=10, help='Max depth for RF')
-    
-    # Logistic Regression parameters
-    parser.add_argument('--max_iter', type=int, default=1000, help='Max iterations for LR')
-    
-    # SVM parameters
-    parser.add_argument('--C', type=float, default=1.0, help='Regularization parameter for SVM')
-    parser.add_argument('--kernel', type=str, default='rbf', help='Kernel for SVM')
-    
-    return parser.parse_args()
-
-def load_and_prepare_data():
-    """
-    Load preprocessed data and prepare for modeling
-    """
+    # Try to load the modeling-ready dataset first
     try:
-        # Load preprocessed data
-        df = pd.read_csv('penguins_processed.csv')
-        logging.info(f"Data loaded successfully. Shape: {df.shape}")
+        df = pd.read_csv('automobile_clean.csv')
+        print(f"✅ Loaded automobile_clean.csv! Shape: {df.shape}")
+    except FileNotFoundError:
+        print("❌ automobile_clean.csv not found!")
+        print("Please ensure the dataset is in the same directory as this script.")
+        sys.exit(1)
         
-        # Define features and target
-        feature_columns = ['bill_length_mm', 'bill_depth_mm', 'flipper_length_mm', 
-                          'body_mass_g', 'island_encoded', 'sex_encoded']
-        
-        X = df[feature_columns]
-        y = df['species_encoded']
-        
-        logging.info(f"Features shape: {X.shape}")
-        logging.info(f"Target shape: {y.shape}")
-        logging.info(f"Target distribution: {y.value_counts().to_dict()}")
-        
-        return X, y
-        
-    except Exception as e:
-        logging.error(f"Error loading data: {str(e)}")
-        raise
+    # Clean the data for modeling
+    print("🧹 Preparing data for modeling...")
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    df = df[numeric_cols]
+    print(f"✅ Cleaned data shape: {df.shape}")
+    
+    return df
 
-def get_model(model_name, args):
-    """
-    Get model instance based on name and arguments
-    """
-    if model_name == "random_forest":
-        return RandomForestClassifier(
-            n_estimators=args.n_estimators,
-            max_depth=args.max_depth,
-            random_state=args.random_state
-        )
-    elif model_name == "logistic_regression":
-        return LogisticRegression(
-            max_iter=args.max_iter,
-            random_state=args.random_state
-        )
-    elif model_name == "svm":
-        return SVC(
-            C=args.C,
-            kernel=args.kernel,
-            random_state=args.random_state
-        )
+def prepare_features(df):
+    """Prepare features and target variable"""
+    print("🎯 Preparing features and target...")
+    
+    # Check if target column exists
+    if 'mpg' not in df.columns:
+        print("❌ Target column 'mpg' not found in dataset!")
+        print(f"Available columns: {list(df.columns)}")
+        # Try to find a suitable target column
+        possible_targets = ['mpg', 'price', 'highway-mpg', 'city-mpg']
+        target_col = None
+        for col in possible_targets:
+            if col in df.columns:
+                target_col = col
+                print(f"✅ Using '{col}' as target variable")
+                break
+        
+        if target_col is None:
+            print("❌ No suitable target column found!")
+            sys.exit(1)
     else:
-        raise ValueError(f"Unknown model: {model_name}")
+        target_col = 'mpg'
+    
+    # Separate features and target
+    X = df.drop(target_col, axis=1)
+    y = df[target_col]
+    
+    print(f"📈 Features shape: {X.shape}")
+    print(f"🎯 Target shape: {y.shape}")
+    print(f"✅ Feature columns: {list(X.columns)}")
+    
+    # Verify all features are numeric
+    non_numeric = X.select_dtypes(exclude=[np.number]).columns.tolist()
+    if non_numeric:
+        print(f"⚠️ Non-numeric columns found: {non_numeric}")
+        print("🧹 Converting or dropping non-numeric columns...")
+        X = X.select_dtypes(include=[np.number])
+        print(f"✅ Final features shape: {X.shape}")
+    
+    return X, y
 
-def train_model(model, model_name, X_train, X_test, y_train, y_test, args):
-    """
-    Train model with MLflow tracking
-    """
-    with mlflow.start_run(run_name=model_name):
-        # Enable autolog
+def split_data(X, y, test_size=0.2, random_state=42):
+    """Split data into train and test sets"""
+    print("✂️ Splitting data...")
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state
+    )
+    
+    print(f"🚂 Training set: {X_train.shape[0]} samples")
+    print(f"🧪 Testing set: {X_test.shape[0]} samples")
+    
+    return X_train, X_test, y_train, y_test
+
+def evaluate_model(model, X_test, y_test):
+    """Evaluate model performance"""
+    y_pred = model.predict(X_test)
+    
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    
+    metrics = {
+        'mse': mse,
+        'mae': mae,
+        'r2': r2,
+        'rmse': rmse
+    }
+    
+    return metrics, y_pred
+
+def train_random_forest(X_train, X_test, y_train, y_test):
+    """Train Random Forest model with MLflow tracking"""
+    print("\n🌲 Training Random Forest Model...")
+    
+    with mlflow.start_run(run_name="RandomForest_CI"):
+        # Enable MLflow autolog
         mlflow.sklearn.autolog()
         
-        logging.info(f"Training {model_name}...")
-        
-        # Log parameters from args
-        mlflow.log_param("test_size", args.test_size)
-        mlflow.log_param("random_state", args.random_state)
-        
-        if model_name == "random_forest":
-            mlflow.log_param("n_estimators", args.n_estimators)
-            mlflow.log_param("max_depth", args.max_depth)
-        elif model_name == "logistic_regression":
-            mlflow.log_param("max_iter", args.max_iter)
-        elif model_name == "svm":
-            mlflow.log_param("C", args.C)
-            mlflow.log_param("kernel", args.kernel)
+        # Create and train model
+        rf_model = RandomForestRegressor(
+            n_estimators=100,
+            random_state=42,
+            max_depth=10
+        )
         
         # Train model
-        model.fit(X_train, y_train)
+        rf_model.fit(X_train, y_train)
         
-        # Make predictions
-        y_pred = model.predict(X_test)
+        # Evaluate model
+        metrics, y_pred = evaluate_model(rf_model, X_test, y_test)
         
-        # Calculate metrics
-        accuracy = accuracy_score(y_test, y_pred)
+        # Log additional metrics manually
+        mlflow.log_param("model_type", "RandomForestRegressor")
+        mlflow.log_param("dataset_name", "automobile_dataset")
+        mlflow.log_param("training_environment", "GitHub_Actions_CI")
         
-        # Log additional metrics
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_param("model_type", model_name)
+        # Print results
+        print("📊 Random Forest Results:")
+        print(f"   MSE: {metrics['mse']:.4f}")
+        print(f"   MAE: {metrics['mae']:.4f}")
+        print(f"   R²: {metrics['r2']:.4f}")
+        print(f"   RMSE: {metrics['rmse']:.4f}")
         
-        # Log model
-        mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path="model",
-            registered_model_name=f"{model_name}_penguins"
-        )
+        return rf_model, metrics
+
+def train_linear_regression(X_train, X_test, y_train, y_test):
+    """Train Linear Regression model with MLflow tracking"""
+    print("\n📈 Training Linear Regression Model...")
+    
+    with mlflow.start_run(run_name="LinearRegression_CI"):
+        # Enable MLflow autolog
+        mlflow.sklearn.autolog()
         
-        logging.info(f"{model_name} - Accuracy: {accuracy:.4f}")
+        # Create and train model
+        lr_model = LinearRegression()
         
-        # Print classification report
-        print(f"\n{model_name} Classification Report:")
-        print(classification_report(y_test, y_pred))
+        # Train model
+        lr_model.fit(X_train, y_train)
         
-        return model, accuracy
+        # Evaluate model
+        metrics, y_pred = evaluate_model(lr_model, X_test, y_test)
+        
+        # Log additional metrics manually
+        mlflow.log_param("model_type", "LinearRegression")
+        mlflow.log_param("dataset_name", "automobile_dataset")
+        mlflow.log_param("training_environment", "GitHub_Actions_CI")
+        
+        # Print results
+        print("📊 Linear Regression Results:")
+        print(f"   MSE: {metrics['mse']:.4f}")
+        print(f"   MAE: {metrics['mae']:.4f}")
+        print(f"   R²: {metrics['r2']:.4f}")
+        print(f"   RMSE: {metrics['rmse']:.4f}")
+        
+        return lr_model, metrics
 
 def main():
-    """
-    Main function to execute the modeling pipeline
-    """
-    # Parse arguments
-    args = parse_args()
+    """Main function to run the modeling pipeline"""
+    parser = argparse.ArgumentParser(description='MLflow Model Training Pipeline')
+    parser.add_argument('--test_size', type=float, default=0.2, help='Test set size (default: 0.2)')
+    parser.add_argument('--random_state', type=int, default=42, help='Random state (default: 42)')
     
-    # Set MLflow tracking URI
-    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "file:./mlruns"))
-    mlflow.set_experiment("Palmer_Penguins_Classification_CI")
+    args = parser.parse_args()
     
-    logging.info("Starting Palmer Penguins Classification Model Training (CI)")
-    logging.info(f"Arguments: {vars(args)}")
+    print("🚀 Starting MLflow Model Training Pipeline (CI/CD)")
+    print("=" * 50)
+    print(f"⚙️ Parameters: test_size={args.test_size}, random_state={args.random_state}")
+    
+    # Set MLflow tracking URI (local)
+    mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_experiment("Auto_Prediction_CI")
     
     try:
-        # Load and prepare data
-        X, y = load_and_prepare_data()
+        # Load data
+        df = load_data()
         
-        # Split the data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=args.test_size, random_state=args.random_state, stratify=y
-        )
+        # Prepare features
+        X, y = prepare_features(df)
         
-        logging.info(f"Train set shape: {X_train.shape}")
-        logging.info(f"Test set shape: {X_test.shape}")
-        
-        # Determine which models to train
-        if args.model == 'all':
-            models_to_train = ['random_forest', 'logistic_regression', 'svm']
-        else:
-            models_to_train = [args.model]
+        # Split data
+        X_train, X_test, y_train, y_test = split_data(X, y, args.test_size, args.random_state)
         
         # Train models
-        results = {}
-        best_accuracy = 0
-        best_model_name = ""
+        print("\n🤖 Training Models with MLflow Tracking...")
         
-        for model_name in models_to_train:
-            model = get_model(model_name, args)
-            trained_model, accuracy = train_model(
-                model, model_name, X_train, X_test, y_train, y_test, args
-            )
-            results[model_name] = {
-                'model': trained_model,
-                'accuracy': accuracy
-            }
-            
-            if accuracy > best_accuracy:
-                best_accuracy = accuracy
-                best_model_name = model_name
+        # Random Forest
+        rf_model, rf_metrics = train_random_forest(X_train, X_test, y_train, y_test)
         
-        # Log best model information
-        logging.info(f"\nBest Model: {best_model_name}")
-        logging.info(f"Best Accuracy: {best_accuracy:.4f}")
+        # Linear Regression
+        lr_model, lr_metrics = train_linear_regression(X_train, X_test, y_train, y_test)
         
-        # Print results summary
-        print("\n" + "="*50)
-        print("MODEL TRAINING RESULTS SUMMARY")
-        print("="*50)
+        # Compare models
+        print("\n🏆 Model Comparison:")
+        print("=" * 30)
+        print(f"Random Forest R²: {rf_metrics['r2']:.4f}")
+        print(f"Linear Regression R²: {lr_metrics['r2']:.4f}")
         
-        for model_name, result in results.items():
-            print(f"{model_name}: {result['accuracy']:.4f}")
+        best_model = "Random Forest" if rf_metrics['r2'] > lr_metrics['r2'] else "Linear Regression"
+        print(f"🥇 Best Model: {best_model}")
         
-        print(f"\nBest Model: {best_model_name} (Accuracy: {best_accuracy:.4f})")
-        print("="*50)
+        print("\n✅ Training completed successfully!")
+        print("📊 MLflow artifacts saved to ./mlruns/")
+        print("🤖 CI/CD Pipeline executed successfully!")
         
-        logging.info("Model training completed successfully!")
+        # Save summary for CI
+        with open('training_summary.txt', 'w') as f:
+            f.write("MLflow Model Training Summary\n")
+            f.write("=" * 30 + "\n")
+            f.write(f"Random Forest R²: {rf_metrics['r2']:.4f}\n")
+            f.write(f"Linear Regression R²: {lr_metrics['r2']:.4f}\n")
+            f.write(f"Best Model: {best_model}\n")
+            f.write(f"Training Environment: GitHub Actions CI\n")
+        
+        print("📄 Training summary saved to training_summary.txt")
         
     except Exception as e:
-        logging.error(f"Error in main execution: {str(e)}")
-        raise
+        print(f"❌ Error occurred: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

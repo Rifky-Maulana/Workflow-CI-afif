@@ -1,0 +1,58 @@
+name: MLflow Model Training CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.8'
+    
+    - name: Set up Conda
+      uses: conda-incubator/setup-miniconda@v2
+      with:
+        auto-update-conda: true
+        python-version: '3.8'
+        environment-file: MLProject/conda.yaml
+        activate-environment: mlflow-env
+    
+    - name: Install MLflow
+      shell: bash -l {0}
+      run: |
+        conda activate mlflow-env
+        pip install mlflow
+    
+    - name: Run MLflow Project
+      shell: bash -l {0}
+      run: |
+        conda activate mlflow-env
+        cd MLProject
+        mlflow run . --no-conda
+    
+    - name: Upload MLflow artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: mlflow-artifacts
+        path: |
+          MLProject/mlruns/
+          MLProject/*.csv
+        retention-days: 30
+    
+    - name: Display training results
+      shell: bash -l {0}
+      run: |
+        echo "✅ Model training completed successfully!"
+        echo "📊 Check the artifacts tab for MLflow tracking results"
