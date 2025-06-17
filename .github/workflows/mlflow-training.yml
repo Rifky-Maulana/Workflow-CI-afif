@@ -39,7 +39,7 @@ jobs:
       run: |
         conda activate mlflow-env
         cd MLProject
-        mlflow run . --no-conda
+        python modelling.py
     
     - name: Upload MLflow artifacts
       uses: actions/upload-artifact@v4
